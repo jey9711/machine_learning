@@ -11,7 +11,9 @@ from keras.optimizers import RMSprop
 # numpy depencency
 import numpy as np
 
-SEQ_LEN = 40
+FIRST_SENTENCE = input("Start the rap with the line: \n >")
+
+SEQ_LEN = len(FIRST_SENTENCE)
 SEQ_STEP = 3
 
 EPOCH_TIME = 20
@@ -31,8 +33,7 @@ for i in range(0, TEXT_LEN - SEQ_LEN, SEQ_STEP):
   seqs.append(text[i : i + SEQ_LEN])
   next_chars.append(text[i + SEQ_LEN])
 
-char_to_index = defaultdict()
-index_to_char = defaultdict()
+char_to_index, index_to_char = defaultdict(), defaultdict()
 for i, c in enumerate(chars):
   char_to_index[c] = i
   index_to_char[i] = c
@@ -58,8 +59,7 @@ model.compile(loss = 'categorical_crossentropy', optimizer = optimizer)
 model.fit(X, y, batch_size = 128, epochs = EPOCH_TIME)
 # model = load_model("") # When I have trained weights
 
-sentence = "The grass is greener on the other side o"
-sentence = sentence.lower()
+sentence = FIRST_SENTENCE.lower()
 generated_lyrics = sentence
 
 for i in range(400):
@@ -86,9 +86,14 @@ for i in range(400):
   generated_lyrics += next_char
   sentence = sentence[1:] + next_char
 
+  with open("timelapse.txt", "a") as text_file:
+    print("iter #" + str(i) + ":", file = text_file)
+    print(generated_lyrics, file = text_file)
+    print("\n", file = text_file)
+    print("\n", file = text_file)
+  
   sys.stdout.write(next_char)
   sys.stdout.flush()
 
-with open("generated_rap.txt", "w") as text_file:
-  print(generated_lyrics, file = text_file)
-  
+with open("generated_rap.txt", "a") as text_file:
+  print(generated_lyrics, file=text_file)
