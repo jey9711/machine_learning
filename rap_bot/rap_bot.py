@@ -1,49 +1,94 @@
-import random, re
+# basic dependencies
+import io
+import sys
 from collections import defaultdict
-# freqDict is a dict of dict containing frequencies
-def addToProbDict(fileName, freqs):
-	f = open(fileName, 'r')
-	words = re.sub("\n", " \n", f.read()).lower().split(' ')
-	# count the frequencies of each word to their successors
-	for curr_word, succ_word in zip(words[1:], words[:-1]):
-		freqs.setdefault(curr_word, {succ_word: 1})
-		freqs[curr_word].setdefault(succ_word, 0)
-		freqs[curr_word][succ_word] += 1
-	# compute percentages
-	prob_dict = defaultdict()
-	for curr_word, succ_freqs in freqs.items():
-		prob_dict[curr_word] = {}
-		curr_total = sum(succ_freqs.values())
-		for succ_word in succ_freqs:
-			prob_dict[curr_word][succ_word] = succ_freqs[succ_word] / curr_total
-	return prob_dict
+# keras dependencies
+from keras.models import Sequential
+from keras.layers import Dense
+from keras.layers import Activation
+from keras.layers import LSTM
+from keras.optimizers import RMSprop
+# numpy depencency
+import numpy as np
 
+SEQ_LEN = 40
+SEQ_STEP = 3
 
-def nextWord(currWord, probDict):
-	if currWord not in probDict:
-		return random.choice(list(probDict.keys()))
+EPOCH_TIME = 20
+DIVERSITY = 1.0
 
-	succ_probs = probDict[currWord]
-	rand_prob = random.random()
-	curr_prob = 0.0
-	for succ_word in succ_probs:
-		curr_prob += succ_probs[succ_word]
-		if rand_prob <= curr_prob:
-			return succ_word
-	return random.choice(list(probDict.keys()))
+SRC = "kanye.txt"
 
+# Retrieve unique characters from source
+text = io.open(SRC, 'r', encoding = 'utf8').read().lower()
+TEXT_LEN = len(text)
+chars = sorted(list(set(text)))
+CHARS_LEN = len(chars)
 
-def rap(startWord, probDict, T = 50):
-	new_rap = [startWord]
-	for t in range(T):
-		new_rap.append(nextWord(new_rap[-1], probDict))
-	return " ".join(new_rap)
+# sequences of lyrics chunk; next chars as training labels
+seqs, next_chars = [], []
+for i in range(0, TEXT_LEN - SEQ_LEN, SEQ_STEP):
+  seqs.append(text[i : i + SEQ_LEN])
+  next_chars.append(text[i + SEQ_LEN])
 
+char_to_index = defaultdict()
+index_to_char = defaultdict()
+for i, c in enumerate(chars):
+  char_to_index[c] = i
+  index_to_char[i] = c
 
-word_to_successor_freqs = defaultdict()
-word_to_successor_probs = addToProbDict('lyrics1.txt', word_to_successor_freqs)
-word_to_successor_probs = addToProbDict('lyrics2.txt', word_to_successor_freqs)
+# X,y are sequences and next_chars as vectors
+X = np.zeros((len(seqs), SEQ_LEN, CHARS_LEN), dtype = np.bool)
+y = np.zeros((len(seqs), CHARS_LEN), dtype = np.bool)
+for i, s in enumerate(seqs):
+  for j, c in enumerate(s):
+    X[i, j, char_to_index[c]] = 1
+  y[i, char_to_index[next_chars[i]]] = 1
 
-first_word = input("What do you want to start your rap with?\n > ")
-print("Alright, here's your rap:")
-print(rap(first_word, word_to_successor_probs))
+# Build model
+model = Sequential()
+model.add(LSTM(128, input_shape = (SEQ_LEN, CHARS_LEN)))
+model.add(Dense(CHARS_LEN))
+model.add(Activation('softmax'))
+
+optimizer = RMSprop(lr = 0.01)
+model.compile(loss = 'categorical_crossentropy', optimizer = optimizer)
+
+# Train model
+model.fit(X, y, batch_size = 128, epochs = EPOCH_TIME)
+# model = load_model("") # When I have trained weights
+
+sentence = "The grass is greener on the other side o"
+sentence = sentence.lower()
+generated_lyrics = sentence
+
+for i in range(400):
+  x = np.zeros((1, SEQ_LEN, len(chars)))
+  for t, char in enumerate(sentence):
+    x[0, t, char_to_index[char]] = 1.0
+  
+  def getPredictions(temp = 1):
+    temp = temp if temp != 0 else 1
+    pred_list = model.predict(x, verbose = 0)[0]
+    pred_arr = np.asarray(pred_list).astype('float64')
+    logged_pred = [np.log(p) / temp for p in pred_arr]
+    exp_sum = sum([np.exp(lp) for lp in logged_pred])
+    preds = [np.exp(lp) / exp_sum for lp in logged_pred]
+    return preds
+  
+  # get probabilities of predictions in multinomial distribution
+  predictions = getPredictions(DIVERSITY)
+  mult_probs = np.random.multinomial(1, predictions, 1)
+  
+  next_index = np.argmax(mult_probs)
+  next_char = index_to_char[next_index]
+
+  generated_lyrics += next_char
+  sentence = sentence[1:] + next_char
+
+  sys.stdout.write(next_char)
+  sys.stdout.flush()
+
+with open("generated_rap.txt", "w") as text_file:
+  print(generated_lyrics, file = text_file)
+  
